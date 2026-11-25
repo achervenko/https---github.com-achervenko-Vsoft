@@ -17,3 +17,7 @@ preview.pdf
 queue.json
 *.status.json
 /target/
+
+# Desktop application
+/desktop/node_modules/
+/desktop/dist/

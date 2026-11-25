@@ -141,8 +141,16 @@ work = Path(scratch.name)
 subset = pymupdf.open()
 for n in numbers:
     p = doc[n-1]
-    if tuple(p.rect) != (0,0,1127,762) or p.rotation or not p.get_text().strip() or not p.get_drawings():
-        raise SystemExit(f'Sheet {n}: unsupported template, rotation, or missing editable source; manual review needed')
+    if p.rotation:
+        raise SystemExit(f'Sheet {n}: unsupported rotation ({p.rotation} degrees)')
+    if tuple(p.rect) != (0, 0, 1127, 762):
+        raise SystemExit(
+            f'Sheet {n}: unsupported page size ({p.rect.width:g} x {p.rect.height:g} pt; expected 1127 x 762 pt)'
+        )
+    if not p.get_text().strip():
+        raise SystemExit(f'Sheet {n}: missing PDF text')
+    if not p.get_drawings():
+        raise SystemExit(f'Sheet {n}: missing vector geometry')
     subset.insert_pdf(doc,from_page=n-1,to_page=n-1)
 subset.save(work/'source.pdf')
 (work/'pages.json').write_text(json.dumps({'numbers':numbers,'total':total}))
