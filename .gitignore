@@ -16,3 +16,4 @@ report.json
 preview.pdf
 queue.json
 *.status.json
+/target/

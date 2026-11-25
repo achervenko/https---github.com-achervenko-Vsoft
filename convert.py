@@ -13,6 +13,7 @@ from pathlib import Path
 import ezdxf
 import pymupdf
 import plot_verify
+import input_pages
 
 parser = argparse.ArgumentParser()
 parser.add_argument('pdf', type=Path)
@@ -23,24 +24,24 @@ parser.add_argument('--acad', type=Path, default=Path(r'C:\Program Files\Autodes
 parser.add_argument('--skip-preview', action='store_true', help='Validate DWG and DXF without plotting PDF')
 args = parser.parse_args()
 
+try:
+    acad_executable = args.acad.resolve(strict=True)
+except (OSError, RuntimeError) as error:
+    parser.error(f'Cannot resolve --acad path {args.acad}: {error}')
+if not acad_executable.is_file():
+    parser.error(f'--acad must point to an AutoCAD executable file: {acad_executable}')
+
 src = args.pdf.resolve()
 dest = args.destination.resolve()
 reference = args.reference_dxf.resolve()
 doc = pymupdf.open(src)
 total = len(doc)
-numbers = []
 try:
-    for segment in (args.pages or f'1-{total}').split(','):
-        first, sep, last = segment.strip().partition('-')
-        start, end = int(first), int(last if sep else first)
-        if not 1 <= start <= end <= total:
-            raise ValueError
-        numbers.extend(range(start, end+1))
-except ValueError:
-    parser.error(f'Invalid page range. Use numbers within 1-{total}, e.g. 1,5-8.')
-if not numbers or len(set(numbers)) != len(numbers):
-    parser.error('The page selection must be nonempty and contain no duplicates.')
-key = hashlib.sha256(src.read_bytes()+reference.read_bytes()+str((numbers,args.skip_preview)).encode()+Path(__file__).read_bytes()+Path(__file__).with_name('build.py').read_bytes()+Path(plot_verify.__file__).read_bytes()).hexdigest()
+    numbers = input_pages.select_pages(args.pages, total)
+except ValueError as error:
+    parser.error(str(error))
+options = json.dumps([numbers, args.skip_preview, str(acad_executable)]).encode('utf-8')
+key = hashlib.sha256(src.read_bytes()+reference.read_bytes()+options+Path(__file__).read_bytes()+Path(__file__).with_name('build.py').read_bytes()+Path(plot_verify.__file__).read_bytes()+Path(input_pages.__file__).read_bytes()).hexdigest()
 dest.mkdir(parents=True,exist_ok=True)
 lock_dir = dest/'_work'
 lock_dir.mkdir(exist_ok=True)
@@ -96,7 +97,7 @@ def acad(name, drawing, commands):
     script.write_text('\n'.join(commands)+'\n',encoding='utf-8')
     with (logs/(name+'.log')).open('wb') as log:
         try:
-            result = subprocess.run([str(args.acad.resolve()),'/i',str(drawing),'/s',str(script),'/l','en-US'],cwd=work,stdout=log,stderr=subprocess.STDOUT,timeout=300)
+            result = subprocess.run([str(acad_executable),'/i',str(drawing),'/s',str(script),'/l','en-US'],cwd=work,stdout=log,stderr=subprocess.STDOUT,timeout=300)
         except subprocess.TimeoutExpired as error:
             raise RuntimeError(f'AutoCAD timed out. See {log.name}') from error
     if result.returncode:
