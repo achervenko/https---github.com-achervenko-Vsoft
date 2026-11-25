@@ -15,6 +15,38 @@ import pymupdf
 import plot_verify
 import input_pages
 
+
+def select_source_pages(selection, total):
+    selector = os.environ.get('VSOFT_PAGE_SELECTOR')
+    if not selector:
+        return input_pages.select_pages(selection, total)
+    result = subprocess.run(
+        [selector, '_select-pages', str(total), str(sys.get_int_max_str_digits())],
+        input=(selection or '').encode('utf-8'),
+        capture_output=True,
+        check=False,
+    )
+    diagnostic = result.stderr.decode('utf-8', errors='replace').strip()
+    if result.returncode == 2:
+        raise ValueError(diagnostic)
+    if result.returncode:
+        raise RuntimeError(f'Rust page selection failed: {diagnostic}')
+    try:
+        numbers = json.loads(result.stdout)
+    except ValueError as error:
+        raise RuntimeError(f'Invalid Rust page selector response: {error}') from error
+    if (
+        not isinstance(numbers, list)
+        or not numbers
+        or any(type(number) is not int or not 1 <= number <= total for number in numbers)
+        or len(set(numbers)) != len(numbers)
+    ):
+        raise RuntimeError(
+            f'Invalid Rust page selector response: expected a nonempty list of unique integers within 1-{total}'
+        )
+    return numbers
+
+
 parser = argparse.ArgumentParser()
 parser.add_argument('pdf', type=Path)
 parser.add_argument('reference_dxf', type=Path, help='DXF export of the agreed DWG reference')
@@ -37,7 +69,7 @@ reference = args.reference_dxf.resolve()
 doc = pymupdf.open(src)
 total = len(doc)
 try:
-    numbers = input_pages.select_pages(args.pages, total)
+    numbers = select_source_pages(args.pages, total)
 except ValueError as error:
     parser.error(str(error))
 options = json.dumps([numbers, args.skip_preview, str(acad_executable)]).encode('utf-8')
