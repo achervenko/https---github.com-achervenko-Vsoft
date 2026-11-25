@@ -79,6 +79,7 @@ lock_dir = dest/'_work'
 lock_dir.mkdir(exist_ok=True)
 lock = (lock_dir/'package.lock').open('a+b')
 try:
+    lock.seek(0)
     msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
 except OSError:
     raise SystemExit('Another conversion is already using this destination.')
@@ -94,14 +95,35 @@ def digest(path):
     with path.open('rb') as stream:
         return hashlib.file_digest(stream,'sha256').hexdigest()
 
+
+def write_run_receipt(checksums):
+    # The launcher supplies a fresh path for this invocation. Write before
+    # returning, while the destination is still locked.
+    receipt_path = os.environ.get('VSOFT_RESULT_RECEIPT')
+    if receipt_path:
+        try:
+            with Path(receipt_path).open('x', encoding='utf-8') as stream:
+                json.dump({
+                    'key': key,
+                    'sha256': checksums,
+                    'preview_printed': not args.skip_preview,
+                }, stream)
+        except OSError as error:
+            print(f'Could not write run receipt {receipt_path!r}: {error}', file=sys.stderr)
+
+
 try:
     previous = json.loads(done.read_text(encoding='utf-8'))
-    cached = previous['key']==key and all(
-        digest(dest/name)==previous['sha256'][name] for name in outputs
+    cached = (
+        previous['key'] == key
+        and previous['preview_printed'] is (not args.skip_preview)
+        and set(previous['sha256']) == set(outputs)
+        and all(digest(dest/name) == previous['sha256'][name] for name in outputs)
     )
 except (OSError, ValueError, KeyError, TypeError):
     cached = False
 if cached:
+    write_run_receipt(previous['sha256'])
     print(f'Already verified: {len(numbers)} sheets')
     raise SystemExit
 if done.exists():
@@ -197,6 +219,7 @@ for name in outputs:
 temporary=dest/'complete.json.pending'
 temporary.write_text(json.dumps({'key':key,'sheets':numbers,'total':total,'sha256':checksums,'preview_printed':not args.skip_preview}),encoding='utf-8')
 temporary.replace(done)
+write_run_receipt(checksums)
 print(f'{len(numbers)}/{total} sheets; {sum(r["multiline"] for r in report)} multiline groups; {sum(bool(r["review"]) for r in report)} flagged sheets')
 
 
