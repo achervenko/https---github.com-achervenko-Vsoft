@@ -21,3 +21,4 @@ queue.json
 # Desktop application
 /desktop/node_modules/
 /desktop/dist/
+/desktop/release/

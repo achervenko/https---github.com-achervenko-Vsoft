@@ -11,13 +11,19 @@ use std::{
 use vsoft::{
     input_pages::select_pages,
     job_result::{classify, JobResult, RunReceipt},
+    pdf_subset,
+    universal_layout::{plan_sheets, SheetInput},
 };
 
+mod dashes;
+mod dxf_builder;
 mod package_lock;
+mod pdf_extract;
 use package_lock::PackageLock;
 
 const SELECT_PAGES: &str = "_select-pages";
-const USAGE: &str = "Usage: vsoft <convert|convert-result> <pdf> <reference-dxf> <destination> [--pages <range>] [--acad <path>] [--skip-preview]\n\
+const PLAN_LAYOUT: &str = "_plan-layout";
+const USAGE: &str = "Usage: vsoft <convert|convert-result> <pdf> <reference-dxf|none> <destination> [--pages <range>] [--acad <path>] [--skip-preview] [--profile <eplan|universal>] [--compare-layout] [--builder <python|rust>] [--no-restore-dashes]\n\
 convert-result writes one JSON result to stdout. Put the three paths before the options.\n\
 Run from the repository folder or set VSOFT_ENGINE to the path to convert.py.\n\
 Set VSOFT_PYTHON to select the Python executable (default: python).";
@@ -79,6 +85,17 @@ fn page_selection(mut args: impl Iterator<Item = OsString>) -> ExitCode {
             ExitCode::from(2)
         }
     }
+}
+
+fn layout_plan(mut args: impl Iterator<Item = OsString>) -> Result<(), String> {
+    if args.next().is_some() {
+        return Err("unexpected layout arguments".into());
+    }
+    let sheets: Vec<SheetInput> = serde_json::from_reader(io::stdin().lock())
+        .map_err(|error| format!("could not read sheet dimensions: {error}"))?;
+    let plan = plan_sheets(&sheets).map_err(|error| error.to_string())?;
+    serde_json::to_writer(io::stdout().lock(), &plan)
+        .map_err(|error| format!("could not write layout plan: {error}"))
 }
 
 fn conversion_command(args: impl IntoIterator<Item = OsString>) -> Result<Command, String> {
@@ -225,6 +242,58 @@ fn main() -> ExitCode {
     }
     if action == SELECT_PAGES {
         return page_selection(args);
+    }
+    if action == "_prepare-pdf" {
+        let args: Vec<_> = args.collect();
+        let result = (|| -> Result<(), Box<dyn std::error::Error>> {
+            let (input, output, selection) = match args.as_slice() {
+                [input, output] => (input, output, None),
+                [input, output, pages] => (
+                    input,
+                    output,
+                    Some(pages.to_str().ok_or("invalid UTF-8 page selection")?),
+                ),
+                _ => return Err("expected input PDF, output PDF and optional pages".into()),
+            };
+            let result =
+                pdf_subset::prepare(&PathBuf::from(input), &PathBuf::from(output), selection)?;
+            serde_json::to_writer(io::stdout().lock(), &result)?;
+            Ok(())
+        })();
+        return match result {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("vsoft: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+    if action == "_extract-pdf" {
+        return match pdf_extract::run(args) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("vsoft: PDF extraction failed: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+    if action == "_build-dxf" {
+        return match dxf_builder::run(args) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("vsoft: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+    if action == PLAN_LAYOUT {
+        return match layout_plan(args) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("vsoft: {error}");
+                ExitCode::FAILURE
+            }
+        };
     }
     if action == "convert-result" {
         let args: Vec<_> = args.collect();

@@ -44,16 +44,7 @@ header { padding-bottom: 16px; border-bottom: 1px solid var(--divider); }
 .brand, .actions { display: flex; align-items: center; gap: 8px; }
 .actions { flex-wrap: wrap; }
 .brand { font-size: 19px; }
-.mark {
-  display: grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  border-radius: var(--radius);
-  background: var(--action);
-  color: var(--surface);
-  font-weight: 800;
-}
+.brand-logo { display: block; width: 36px; height: 36px; }
 .format { color: var(--muted); font-size: 13px; font-weight: 650; }
 .format span { margin: 0 5px; }
 .drop {

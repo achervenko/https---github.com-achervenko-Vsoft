@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './style.css';
+import logo from './vsoft-logo.svg?no-inline';
 
 const api = window.vsoft;
 const names = {
@@ -11,6 +12,9 @@ const flags = {
   dash_review: 'Проверить штриховые линии',
   plot_text_review: 'Сверить текст в печати',
   plot_title_review: 'Сверить название в штампе',
+  plot_media_unavailable: 'Для этого листа нет настроенного формата PDF-печати',
+  plot_skipped_due_to_other_sheet: 'PDF-печать пакета пропущена: для другого листа нет настроенного формата',
+  raster_images_omitted: 'Растровые вставки не перенесены',
   unmapped_characters: 'Проверить символы',
   missing_text: 'Не найден текст',
   missing_geometry: 'Не найдена геометрия',
@@ -20,7 +24,24 @@ function filename(file) {
   return file.split(/[\\/]/).at(-1);
 }
 
+function sheetRanges(numbers) {
+  const ranges = [];
+  for (const number of [...numbers].sort((a, b) => a - b)) {
+    const last = ranges.at(-1);
+    if (last && number === last[1] + 1) last[1] = number;
+    else ranges.push([number, number]);
+  }
+  return ranges.map(([first, last]) => first === last ? String(first) : `${first}–${last}`).join(', ');
+}
+
 function Result({ job, onOpen }) {
+  const reviewSheets = new Map();
+  for (const { sheet, review } of job.sheets || []) {
+    for (const flag of review) {
+      if (!reviewSheets.has(flag)) reviewSheets.set(flag, new Set());
+      reviewSheets.get(flag).add(sheet);
+    }
+  }
   return <div className="job">
     <div className="job-head">
       {job.range && <span>Листы {job.range}</span>}
@@ -28,8 +49,11 @@ function Result({ job, onOpen }) {
       {job.dwg && <button className="link" onClick={() => onOpen(job.dwg)}>Открыть DWG</button>}
     </div>
     {job.message && <p>{job.message}</p>}
-    {job.sheets?.map(({ sheet, review }) =>
-      <p className="notice" key={sheet}>Лист {sheet}: {review.map((flag) => flags[flag] || flag).join(', ')}</p>
+    {[...reviewSheets].map(([flag, sheets]) =>
+      <details className="notice" key={flag}>
+        <summary>{flags[flag] || flag} · {sheets.size === 1 ? 'лист' : 'листы'} {sheetRanges(sheets)}</summary>
+        <p>Номера листов: {[...sheets].sort((a, b) => a - b).join(', ')}</p>
+      </details>
     )}
     {job.diagnostic && !['ready', 'needs_review'].includes(job.status) &&
       <details><summary>Подробности</summary><pre>{job.diagnostic}</pre></details>}
@@ -108,7 +132,7 @@ function App() {
 
   return <main>
     <header>
-      <div className="brand"><span className="mark">V</span><strong>VSoft</strong></div>
+      <div className="brand"><img className="brand-logo" src={logo} alt="" /><strong>VSoft</strong></div>
       <span className="format">PDF <span>→</span> DWG</span>
     </header>
 

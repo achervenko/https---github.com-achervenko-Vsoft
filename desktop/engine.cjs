@@ -1,5 +1,5 @@
 const { spawn } = require('node:child_process');
-const { createHash } = require('node:crypto');
+const { constants } = require('node:fs');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 
@@ -74,52 +74,51 @@ function parseOutcome({ code, stdout }, expectedDwg) {
   return { status: 'result_error', message: 'Ошибка протокола: движок вернул некорректный результат.' };
 }
 
-async function convertPdf({ root, source, destination, selection, beforeWrite }) {
+async function convertPdf({ root, source, destination, workspace, selection, beforeWrite }) {
   const executable = path.resolve(root, process.env.VSOFT_BIN || path.join('target', 'release', 'vsoft.exe'));
-  const reference = path.resolve(root, process.env.VSOFT_REFERENCE || 'reference.dxf');
+  const profile = process.env.VSOFT_PROFILE || 'universal';
+  const reference = profile === 'eplan' ? path.resolve(root, process.env.VSOFT_REFERENCE || 'reference.dxf') : 'none';
   await fs.access(executable).catch(() => { throw new Error('Соберите движок командой cargo build --release.'); });
-  await fs.access(reference).catch(() => { throw new Error('Не найден reference.dxf. Положите референс в корень проекта.'); });
-  const identity = createHash('sha256').update(source).digest('hex').slice(0, 12);
-  const ranges = [];
-  if (selection) {
-    const scope = createHash('sha256').update(selection).digest('hex').slice(0, 8);
-    ranges.push({ pages: selection, folder: 'selection-' + scope });
-  } else {
-    const python = process.env.VSOFT_PYTHON || 'python';
-    const metadata = await execute(python, [
-      '-c', 'import sys, pymupdf; print(len(pymupdf.open(sys.argv[1])))', source,
-    ], root);
-    const total = Number(metadata.stdout.trim());
-    if (metadata.code !== 0 || !Number.isInteger(total) || total < 1) {
-      throw new Error(metadata.stderr.trim() || 'Не удалось прочитать число страниц PDF.');
-    }
-    for (let first = 1; first <= total; first += 100) {
-      const last = Math.min(first + 99, total);
-      ranges.push({ pages: first + '-' + last, folder: first + '-' + last });
-    }
+  if (profile === 'eplan') {
+    await fs.access(reference).catch(() => { throw new Error('Не найден reference.dxf. Положите референс в корень проекта.'); });
   }
-
-  const project = path.join(destination, path.basename(source, path.extname(source)) + '-' + identity);
-  const packages = ranges.map((range) => ({ ...range, output: path.join(project, range.folder) }));
-  beforeWrite?.(packages.map(({ output }) => path.join(output, 'drawing.dwg')));
-  const results = [];
-  for (const { pages, output } of packages) {
-    const result = await execute(executable, [
-      'convert-result', source, reference, output, '--pages', pages,
-    ], root);
-    const outcome = parseOutcome(result, path.join(output, 'drawing.dwg'));
-    const diagnostic = result.stderr.trim();
-    const size = diagnostic.match(/^Sheet (\d+): unsupported page size \(([\d.]+) x ([\d.]+) pt; expected ([\d.]+) x ([\d.]+) pt\)$/m);
-    const rotation = diagnostic.match(/^Sheet (\d+): unsupported rotation \((\d+) degrees\)$/m);
-    const missing = diagnostic.match(/^Sheet (\d+): (missing PDF text|missing vector geometry)$/m);
-    if (outcome.status === 'error') {
-      if (size) outcome.message = `Лист ${size[1]}: размер ${size[2]} × ${size[3]} пт. Текущий профиль поддерживает ${size[4]} × ${size[5]} пт.`;
-      if (rotation) outcome.message = `Лист ${rotation[1]}: текущий профиль не поддерживает поворот на ${rotation[2]}°.`;
-      if (missing) outcome.message = `Лист ${missing[1]}: ${missing[2] === 'missing PDF text' ? 'в PDF нет текстового слоя' : 'в PDF нет векторной геометрии'}.`;
-    }
-    results.push({ ...outcome, range: pages, diagnostic });
+  const published = path.join(destination, path.parse(source).name + '.dwg');
+  const collision = { status: 'result_error', message: 'DWG с таким именем уже существует. Выберите другую папку результатов.' };
+  try {
+    await fs.lstat(published);
+    return [collision];
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
   }
-  return results;
+  beforeWrite?.([published]);
+  await fs.mkdir(workspace, { recursive: true });
+  const output = await fs.mkdtemp(path.join(workspace, 'job-'));
+  const pages = selection;
+  const result = await execute(executable, [
+    'convert-result', source, reference, output, '--profile', profile,
+    ...(profile === 'universal' && process.env.VSOFT_BUILDER ? ['--builder', process.env.VSOFT_BUILDER] : []),
+    ...(pages ? ['--pages', pages] : []),
+  ], root);
+  const outcome = parseOutcome(result, path.join(output, 'drawing.dwg'));
+  const diagnostic = result.stderr.trim();
+  const size = diagnostic.match(/^Sheet (\d+): unsupported page size \(([\d.]+) x ([\d.]+) pt; expected ([\d.]+) x ([\d.]+) pt\)$/m);
+  const rotation = diagnostic.match(/^Sheet (\d+): unsupported rotation \((\d+) degrees\)$/m);
+  const missing = diagnostic.match(/^Sheet (\d+): (missing PDF text|missing vector geometry)$/m);
+  if (outcome.status === 'error') {
+    if (size) outcome.message = `Лист ${size[1]}: размер ${size[2]} × ${size[3]} пт. Текущий профиль поддерживает ${size[4]} × ${size[5]} пт.`;
+    if (rotation) outcome.message = `Лист ${rotation[1]}: текущий профиль не поддерживает поворот на ${rotation[2]}°.`;
+    if (missing) outcome.message = `Лист ${missing[1]}: ${missing[2] === 'missing PDF text' ? 'в PDF нет текстового слоя' : 'в PDF нет векторной геометрии'}.`;
+  }
+  if (outcome.dwg) {
+    try {
+      await fs.copyFile(outcome.dwg, published, constants.COPYFILE_EXCL);
+    } catch (error) {
+      if (error.code === 'EEXIST') return [collision];
+      return [{ status: 'result_error', message: 'Не удалось сохранить DWG.', diagnostic: error.message }];
+    }
+    outcome.dwg = published;
+  }
+  return [{ ...outcome, range: pages, diagnostic }];
 }
 
 module.exports = { collectPdfs, convertPdf };

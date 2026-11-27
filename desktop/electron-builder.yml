@@ -1,0 +1,29 @@
+appId: com.vsoft.desktop
+productName: VSoft
+artifactName: VSoft-Setup-${version}-${arch}.exe
+directories:
+  output: release
+files:
+  - dist/**
+  - main.cjs
+  - engine.cjs
+  - preload.cjs
+  - src/vsoft-icon.ico
+extraResources:
+  - from: ..
+    to: engine
+    filter:
+      - convert.py
+      - build.py
+      - input_pages.py
+      - plot_verify.py
+      - universal.py
+      - universal_dashes.py
+      - universal_rust.py
+      - target/release/vsoft.exe
+win:
+  icon: src/vsoft-icon.ico
+  target: nsis
+nsis:
+  shortcutName: VSoft
+  runAfterFinish: false

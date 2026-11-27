@@ -3,7 +3,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { collectPdfs, convertPdf } = require('./engine.cjs');
 
-const root = path.resolve(__dirname, '..');
+const root = app.isPackaged ? path.join(process.resourcesPath, 'engine') : path.resolve(__dirname, '..');
 const sources = new Set();
 const results = new Set();
 let destination = '';
@@ -39,7 +39,7 @@ function registerHandlers() {
     running = true;
     try {
       const jobs = await convertPdf({
-        root, source, destination, selection,
+        root, source, destination, selection, workspace: path.join(app.getPath('userData'), 'conversion-jobs'),
         beforeWrite(paths) {
           for (const file of paths) results.delete(file);
         },
@@ -60,9 +60,11 @@ function registerHandlers() {
 }
 
 app.whenReady().then(() => {
+  app.setAppUserModelId('com.vsoft.desktop');
   registerHandlers();
   const window = new BrowserWindow({
     title: 'VSoft', width: 980, height: 820, minWidth: 690, minHeight: 640,
+    icon: path.join(__dirname, 'src', 'vsoft-icon.ico'),
     backgroundColor: '#f7f8fa', autoHideMenuBar: true,
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true },
   });

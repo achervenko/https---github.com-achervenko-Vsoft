@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title">
+  <title id="title">VSoft</title>
+  <rect x="8" y="9" width="112" height="110" rx="15" fill="#111"/>
+  <g fill="#fff">
+    <path id="arrow" d="M46 38 A29 29 0 0 1 93 61 H101 L88 80 L75 61 H83 A19 19 0 0 0 51 46 Z"/>
+    <use href="#arrow" transform="rotate(180 64 64)"/>
+  </g>
+</svg>

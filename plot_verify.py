@@ -10,6 +10,24 @@ def words(text):
     return Counter(re.findall(r'[^\W_]+', normalized))
 
 
+def inspect_universal(page, sheet, size, source_text):
+    from universal import PLOT_TOLERANCE_PT
+    if (any(abs(actual - expected) > PLOT_TOLERANCE_PT
+            for actual, expected in zip((page.rect.width, page.rect.height), size))
+            or not page.get_drawings()):
+        raise ValueError(f'Sheet {sheet}: plot size differs from source or geometry is missing.')
+    text = page.get_text()
+    expected = words(source_text)
+    missing = expected - words(text)
+    return {
+        'expected_words': sum(expected.values()),
+        'missing_word_count': sum(missing.values()),
+        'missing_words': dict(missing),
+        'missing_title_words': {},
+        'replacement_chars': text.count('\ufffd'),
+    }
+
+
 def inspect(page, sheet, total, entities):
     width, height = page.rect.width, page.rect.height
     if abs(width-1190.55)>2 or abs(height-841.89)>2 or not page.get_drawings():
